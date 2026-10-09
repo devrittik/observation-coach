@@ -1,0 +1,7 @@
+node_modules/
+.next/
+.env*
+!.env.example
+!.env.hosted.example
+storage/
+*.tsbuildinfo

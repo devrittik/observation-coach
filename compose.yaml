@@ -1,0 +1,26 @@
+services:
+  mongo:
+    image: mongo:8.0
+    command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
+    restart: unless-stopped
+    ports:
+      # Development only: never expose this unauthenticated instance to your network.
+      - '127.0.0.1:27017:27017'
+    volumes:
+      - observation_mongo_data:/data/db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval 'try { if (!rs.status().ok) quit(1); }
+          catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]}); }
+          if (!db.hello().isWritablePrimary) quit(1);'
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  # Docker-managed disk storage survives container restarts and `docker compose down`.
+  # `docker compose down -v` deliberately DELETES it; do not use it to stop the DB.
+  observation_mongo_data:
