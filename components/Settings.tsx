@@ -132,7 +132,8 @@ export function Settings() {
         </div>
         <p className="tiny-copy">
           Optional browser voice recognition may send audio to the browser vendor. We ask before
-          enabling it. You can always type instead.
+          enabling it. Listening stays open until you stop it or after about 5 seconds of silence.
+          You can always type instead.
         </p>
       </section>
       <details className="disclosure">

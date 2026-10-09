@@ -24,7 +24,7 @@ import { api, useCoach } from './Provider';
 import { Back, Button, ErrorMessage, Loading, ModeNote, Steps, errorText, sessionHref } from './ui';
 import { durations, sampleObservation, skillInfo } from '@/lib/data/exercises';
 import type { ObservationSession } from '@/lib/types';
-import { browserSpeechInput, browserSpeechOutput } from '@/lib/voice';
+import { browserSpeechInput, browserSpeechOutput, joinTranscript } from '@/lib/voice';
 export function SessionSetup() {
   const params = useSearchParams();
   const { data, refresh } = useCoach();
@@ -126,6 +126,10 @@ export function SessionFlow() {
   const [listening, setListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const stopVoice = useRef<() => void>(() => {});
+  /** Existing text captured when dictation starts; each voice result extends it. */
+  const voiceBase = useRef('');
+  /** Bumped by manual edits so late voice results can never overwrite or repeat them. */
+  const voiceGeneration = useRef(0);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const draftKey = `observation-draft:${data.user?.id}:${id}`;
   const answerKey = `observation-answer:${data.user?.id}:${id}`;
@@ -172,6 +176,13 @@ export function SessionFlow() {
     if (expected.split('?')[0] !== path) router.replace(expected);
   }, [session, path, router]);
   function writeText(value: string) {
+    // A manual edit ends dictation so recognized text can never overwrite or repeat it.
+    if (listening) {
+      stopVoice.current();
+      setListening(false);
+    }
+    voiceGeneration.current += 1;
+    voiceBase.current = value;
     setText(value);
     try {
       sessionStorage.setItem(draftKey, value);
@@ -217,19 +228,22 @@ export function SessionFlow() {
     setError('');
     try {
       setListening(true);
+      voiceBase.current = text;
+      const generation = ++voiceGeneration.current;
       stopVoice.current = browserSpeechInput.start(
-        (result) => {
-          setText((previous) => {
-            const next = (previous ? previous + ' ' : '') + result;
-            try {
-              sessionStorage.setItem(draftKey, next.slice(0, 5000));
-            } catch {}
-            return next.slice(0, 5000);
-          });
+        (voiceText) => {
+          // The adapter delivers the complete dictation transcript on every update;
+          // replace the voice portion instead of appending, so repeats cannot pile up.
+          if (generation !== voiceGeneration.current) return;
+          const next = joinTranscript(voiceBase.current, voiceText);
+          setText(next);
+          try {
+            sessionStorage.setItem(draftKey, next);
+          } catch {}
         },
         () => setListening(false),
         (message) => {
-          setError(message);
+          if (generation === voiceGeneration.current) setError(message);
           setListening(false);
         },
       );
@@ -436,7 +450,8 @@ export function SessionFlow() {
             <div className="voice-box">
               <p>
                 Your browser’s speech service may send audio to its vendor and may need internet
-                access. Voice is optional; typing keeps audio private.
+                access. Voice is optional; typing keeps audio private. Listening stays open until
+                you stop it or after about 5 seconds of silence.
               </p>
               <div className="voice-actions">
                 <Button
@@ -459,7 +474,11 @@ export function SessionFlow() {
             </div>
           )}
           <ErrorMessage message={error} />
-          <p className="field-hint">Your draft is kept in this browser tab while you write.</p>
+          <p className="field-hint">
+            {listening
+              ? 'Listening… speak naturally. It stops when you tap “Stop listening” or after 5 seconds of silence.'
+              : 'Your draft is kept in this browser tab while you write.'}
+          </p>
           <ModeNote provider={s.provider} />
         </form>
       </div>

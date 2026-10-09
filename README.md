@@ -151,7 +151,9 @@ All fonts and images are bundled. Once installed and built, a local application/
 
 ## Optional voice
 
-Browser speech input and explicit read-aloud controls are behind `SpeechInput` and `SpeechOutput` interfaces in `lib/voice/`. Voice is never automatic or mandatory. The UI warns that browser services may use a vendor's servers. Unsupported or denied microphone access leaves typing available. Actual microphone and speaker behavior needs testing on your target device.
+Browser speech input and explicit read-aloud controls are behind `SpeechInput` and `SpeechOutput` interfaces in `lib/voice/`. Voice is never automatic or mandatory. The UI warns that browser services may use a vendor's servers. Unsupported or denied microphone access leaves typing available.
+
+Dictation stays open until you stop it or about 5 seconds pass without new speech results; short pauses do not end it. Recognized text appears live and is updated in place, so repeated browser results cannot duplicate words, and any manual edit of the text ends dictation rather than overwriting what you typed. Actual microphone and speaker behavior still needs testing on your target device.
 
 ## Centralized architecture
 

@@ -80,23 +80,23 @@ Updated: **2026-10-08**. Status: functional MVP and guided demo; live inference 
 
 ## Verification detail
 
-| Area                         | Result                                                                                                                        |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Account lifecycle            | Registration, wrong password, correct login, logout, deletion tested in browser                                               |
-| Protection and isolation     | Anonymous API rejection, protected-page redirect, cross-user read/write rejection tested                                      |
-| Complete observation         | Demo exercise → outside → reflection → follow-up → completion → growth → history tested                                       |
-| Refresh                      | Outside-stage recovery and same-tab reflection draft recovery tested                                                          |
-| Input boundaries             | Empty, whitespace-only, very long input, invalid duration, invalid stage tested; very short demo analysis covered             |
-| Duplicate writes             | Repeated session start resumes; repeated completion does not award twice                                                      |
-| Model adapters               | Real HTTP requests to simulated local/hosted compatible endpoint; exact messages/authentication and invalid responses tested  |
-| Missing model setup          | Local/hosted setup failures tested; no fallback                                                                               |
-| Database failure             | Initialization failure surfaced without replacing/resetting storage                                                           |
-| Mobile                       | 390px home and registration overflow checks; screenshots inspected                                                            |
-| Accessibility                | Automated WCAG A/AA checks on public pages and selected exercise/completion screens; no detected violations in checked states |
-| Offline assets               | Public screens load with all non-app origins blocked; no external asset requests observed                                     |
-| Real inference               | **Not verified** — no model/credentials supplied                                                                              |
-| Real voice                   | **Not verified** — needs browser/device testing                                                                               |
-| Complete offline local stack | **Not verified with an actual model**; architecture has no required WAN assets                                                |
+| Area                         | Result                                                                                                                                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Account lifecycle            | Registration, wrong password, correct login, logout, deletion tested in browser                                                                                                            |
+| Protection and isolation     | Anonymous API rejection, protected-page redirect, cross-user read/write rejection tested                                                                                                   |
+| Complete observation         | Demo exercise → outside → reflection → follow-up → completion → growth → history tested                                                                                                    |
+| Refresh                      | Outside-stage recovery and same-tab reflection draft recovery tested                                                                                                                       |
+| Input boundaries             | Empty, whitespace-only, very long input, invalid duration, invalid stage tested; very short demo analysis covered                                                                          |
+| Duplicate writes             | Repeated session start resumes; repeated completion does not award twice                                                                                                                   |
+| Model adapters               | Real HTTP requests to simulated local/hosted compatible endpoint; exact messages/authentication and invalid responses tested                                                               |
+| Missing model setup          | Local/hosted setup failures tested; no fallback                                                                                                                                            |
+| Database failure             | Initialization failure surfaced without replacing/resetting storage                                                                                                                        |
+| Mobile                       | 390px home and registration overflow checks; screenshots inspected                                                                                                                         |
+| Accessibility                | Automated WCAG A/AA checks on public pages and selected exercise/completion screens; no detected violations in checked states                                                              |
+| Offline assets               | Public screens load with all non-app origins blocked; no external asset requests observed                                                                                                  |
+| Real inference               | **Not verified** — no model/credentials supplied                                                                                                                                           |
+| Real voice                   | Dictation state machine covered by unit tests (stop, 5-second silence, duplicate results, browser restarts); real microphone/audio behavior **not verified** — needs target-device testing |
+| Complete offline local stack | **Not verified with an actual model**; architecture has no required WAN assets                                                                                                             |
 
 ## Technical decisions
 
@@ -160,3 +160,12 @@ Updated: **2026-10-08**. Status: functional MVP and guided demo; live inference 
 - [ ] Migrate legacy SQLite accounts/history if requested; not performed by this change.
 
 The sandbox browser checks use a disposable test replica set, not Atlas. The persistent local deployment is the Docker named-volume setup. No live Atlas connection is claimed.
+
+## Voice dictation checkpoint
+
+- [x] Dictation continues until the user stops it or 5 seconds pass without new speech results (short pauses do not end the session).
+- [x] The recognition adapter rebuilds its transcript in place from the browser's cumulative result list and emits the complete transcript on every update; the UI replaces rather than appends it, so re-fired/revised browser results cannot repeat phrases.
+- [x] The browser closing recognition on its own is restarted transparently without losing or duplicating committed text.
+- [x] A manual edit of the text ends dictation instead of letting late results overwrite typed words.
+- [x] Silence auto-stop, manual stop idempotence, restart, duplicate results, and fatal-error behavior covered in `tests/voice.test.ts`.
+- [ ] Real microphone and speaker behavior on target mobile browsers remains unverified in this environment.
