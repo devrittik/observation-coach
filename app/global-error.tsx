@@ -10,7 +10,8 @@ export default function GlobalError({ reset }: { reset: () => void }) {
             <h1>We couldn’t open your practice.</h1>
             <p className="body-copy">
               The application or its database may be temporarily unavailable. Try again in a moment.
-              If you run this app locally, check that the database folder is writable and your
+              If you run this app locally, check that MongoDB is up and running as a replica set —
+              DATABASE.md shows the quick no-Docker steps for an installed MongoDB — and that your
               provider configuration is valid.
             </p>
           </div>

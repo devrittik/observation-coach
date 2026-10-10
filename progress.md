@@ -178,3 +178,10 @@ The sandbox browser checks use a disposable test replica set, not Atlas. The per
 - [x] `instrumentation.ts` boot summary and `onRequestError` capture.
 - [x] `.env.example` / `.env.hosted.example`, README, and architecture document the settings and privacy rules.
 - [x] Unit tests for level filtering, redaction, error sanitization, hosted gating, and combined-format output.
+
+## Installed-MongoDB (no Docker) checkpoint
+
+- [x] Reproduced the standalone `DatabaseSetupError` and verified the no-Docker switch end to end: the same data directory started with `--replSet rs0` + `rs.initiate` becomes a writable primary and **keeps all existing records**.
+- [x] Error text now leads with the no-Docker fix (replSet in mongod.cfg + `rs.initiate`) instead of suggesting only Docker/Atlas.
+- [x] `scripts/mongodb-enable-replicaset.ps1` (Windows, Administrator PowerShell) and `scripts/mongodb-enable-replicaset.sh` (macOS/Linux): back up config, enable `replication.replSetName=rs0`, restart the service, initialize once, verify PRIMARY. Idempotent and explicit about already-initialized/foreign replica sets.
+- [x] DATABASE.md section 2 documents manual Windows steps, hand-run `mongod --replSet`, verification, and troubleshooting; README and Settings/global-error copy point to it.

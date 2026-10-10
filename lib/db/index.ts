@@ -70,7 +70,7 @@ async function initialize(): Promise<Connection> {
       if (!hello.setName && hello.msg !== 'isdbgrid') {
         warn('db', 'MongoDB server is not a replica set');
         throw new DatabaseSetupError(
-          'MongoDB must run as a replica set to preserve atomic account and progress updates. Start the supplied Docker Compose service locally, or use MongoDB Atlas.',
+          'MongoDB must run as a replica set to keep account and progress updates atomic. No Docker needed: in your installed MongoDB, set replication.replSetName=rs0 (mongod.cfg), restart it, and run rs.initiate() once — scripts/mongodb-enable-replicaset and DATABASE.md walk through it. The Docker Compose service or MongoDB Atlas also work.',
         );
       }
       await Promise.all([

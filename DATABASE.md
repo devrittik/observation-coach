@@ -6,7 +6,12 @@ The application now uses the official MongoDB Node.js driver for users, login se
 
 ## 1. Local environment (Windows, macOS, Linux)
 
-Install Node.js 20.9+ and Docker Desktop / Docker Engine with Compose v2. Start Docker before running these commands from the project folder.
+Two equivalent ways to run MongoDB locally — **Docker is optional**:
+
+- **A. Already have MongoDB installed?** Use it — no Docker at all. Jump to [section 2](#2-use-your-installed-mongodb--no-docker).
+- **B. Prefer a self-contained database?** Use the supplied Docker Compose service (needs Node.js 20.9+ and Docker Desktop / Engine with Compose v2).
+
+With Docker (option B):
 
 ```powershell
 npm ci
@@ -50,7 +55,7 @@ The app uses MongoDB transactions so completing an observation and awarding prog
 
 The Compose health check automatically initializes the single-node replica set `rs0` and waits for a writable primary. You do not have to configure this manually. **An existing standalone `mongod` will be rejected with a setup message**, rather than silently disabling transactions.
 
-If MongoDB is already installed locally, configure it as a replica set, start it with `--replSet rs0`, initialize it with `mongosh`, and use the URI above. Back up an existing installation before changing its configuration. Avoid running it and Docker on the same port.
+**Installed MongoDB instead of Docker:** a single-node replica set is just a mode your existing `mongod` runs in — same data folder, same records, no container. Section 2 below (and `scripts/mongodb-enable-replicaset`) does it in one step. Avoid running Docker and your own mongod on the same port at the same time.
 
 The supplied URI assumes Next.js runs on your host machine. If you also containerize Next.js, use a MongoDB replica-set hostname reachable from that container; `127.0.0.1` inside a container is not the Docker host.
 
@@ -63,7 +68,86 @@ npm start
 
 Keep `APP_ENV=local` in `.env.local`. A production Next.js build does not by itself mean the database should be hosted. `COOKIE_SECURE=false` is only for local HTTP; enable it for HTTPS.
 
-## 2. Hosted environment: MongoDB Atlas
+## 2. Use your installed MongoDB — no Docker
+
+If `mongod` is already installed (Windows MSI, macOS Homebrew, apt, tarball), Docker is **not** required. The app needs a **single-node replica set** — a normal mode for `mongod` that adds transaction support while keeping your existing data directory and records exactly where they are.
+
+**The symptom this fixes:**
+
+```text
+DatabaseSetupError: MongoDB must run as a replica set to preserve atomic account and progress updates...
+```
+
+That message means the app _reached_ your MongoDB successfully — the server is simply running as a standalone. Two small changes switch it over; nothing is migrated or deleted.
+
+### Windows — one command (recommended)
+
+Run in an **Administrator PowerShell**:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\mongodb-enable-replicaset.ps1
+```
+
+The script backs up `mongod.cfg`, adds `replication.replSetName=rs0`, restarts the MongoDB service, runs `rs.initiate()` once, and waits for PRIMARY. Your data is untouched. Then start the app:
+
+```powershell
+npm run dev
+```
+
+### Windows — manual steps (same thing)
+
+1. Find the config path shown by `sc.exe qc MongoDB` (typically `C:\Program Files\MongoDB\Server\<version>\bin\mongod.cfg`). Keep a backup copy.
+2. Add this **top-level** section to `mongod.cfg` (keep `storage.dbPath` as-is):
+
+```yaml
+replication:
+  replSetName: rs0
+```
+
+3. Restart MongoDB from an Administrator PowerShell: `Restart-Service MongoDB`
+4. Initialize the replica set once:
+
+```powershell
+mongosh --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
+mongosh --eval "rs.status().myState"   # 1 = PRIMARY
+```
+
+If `mongosh` is not on PATH, use `mongosh.exe` inside the server's `bin` folder.
+
+### macOS / Linux
+
+```bash
+sudo bash scripts/mongodb-enable-replicaset.sh
+```
+
+Or manually: add the same `replication:` block to `/etc/mongod.conf` (or your Homebrew config), `sudo systemctl restart mongod`, then run the same `rs.initiate()` with `mongosh`.
+
+### Started mongod by hand?
+
+Stop it and start it again with the **same `--dbpath`** plus `--replSet rs0`, then run the same `rs.initiate()` step:
+
+```bash
+mongod --dbpath /path/to/your/data --replSet rs0
+```
+
+### Confirm it worked
+
+```powershell
+mongosh --eval "db.adminCommand({hello:1}).setName"   # prints: rs0
+```
+
+Then `npm run dev`. The default `MONGODB_URI` in `.env.example` already targets `127.0.0.1:27017` with `replicaSet=rs0&directConnection=true` — no URI change needed for defaults. Enabling the replica set **does not migrate, rewrite, or delete records**; the app picks up where it left off.
+
+### Troubleshooting
+
+- **Edited the config but nothing changed:** confirm it is the file the service actually loads (`sc.exe qc MongoDB` → executable path; the config lives next to `mongod.exe` or in the server root).
+- **`AlreadyInitialized` from rs.initiate:** fine — the replica set exists; check `db.adminCommand({hello:1}).setName` matches `replicaSet=` in `MONGODB_URI`.
+- **Different setName (e.g. `rs1`):** either keep it and update `MONGODB_URI`'s `replicaSet=`, or reconfigure mongod to `rs0`.
+- **App still says "not a replica set":** the app reached _some other_ MongoDB — check the port in `MONGODB_URI` versus what `mongod` actually listens on, and that you restarted after the config change.
+- **`mongosh` missing:** install the MongoDB Shell from mongodb.com, or use the `mongosh.exe` bundled in the server's `bin` directory.
+- **Non-default data folder or port:** that is fine — the script accepts `-Port` and `-ConfigPath`; the app only cares that `MONGODB_URI` points at the right address and `replicaSet` name.
+
+## 3. Hosted environment: MongoDB Atlas
 
 1. Create an Atlas deployment and an application database user. Grant only the required permissions (typically `readWrite` on the chosen application database, including index creation).
 2. Allow the application's outbound network address or configure a private connection. Do not default to unrestricted public network access.
@@ -99,13 +183,13 @@ Restart/redeploy the application after changing secrets. Atlas supplies the repl
 
 The same repository and indexes are used in both environments. No connection string or password is exposed in the UI. A configuration change requires an application restart; hot reload does not silently switch databases.
 
-## 3. Existing SQLite data
+## 4. Existing SQLite data
 
 Your old `storage/coach.sqlite` and related files are **not deleted, overwritten, or automatically uploaded**. `DATABASE_PATH` is no longer used. The new MongoDB database starts with its own accounts and history.
 
 **Existing SQLite accounts/history are not automatically migrated.** Keep a consistent backup of the SQLite database (including its WAL state or use SQLite's backup API) if you need those records. Moving them to local MongoDB or Atlas is a separate, explicit data migration. No migration has been run as part of this change.
 
-## 4. Checks and troubleshooting
+## 5. Checks and troubleshooting
 
 ```powershell
 docker compose ps

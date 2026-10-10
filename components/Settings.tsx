@@ -139,9 +139,11 @@ export function Settings() {
       <details className="disclosure">
         <summary>For developers · Configure local or hosted coaching</summary>
         <p className="tiny-copy spaced-top">
-          Run Next.js and a persistent MongoDB replica set on your machine for fully local use. Set
-          these values in .env.local and restart the server. The URL is reached by the application
-          server, not the browser.
+          Run Next.js with a MongoDB replica set on your machine for fully local use — either your
+          already-installed MongoDB with its replica set enabled (no Docker; see DATABASE.md or run
+          scripts/mongodb-enable-replicaset) or the supplied Docker Compose service. Set these
+          values in .env.local and restart the server. The URL is reached by the application server,
+          not the browser.
         </p>
         <pre className="code-block">{`# Local open-weight model\nLLM_PROVIDER=local\nLOCAL_LLM_BASE_URL=http://localhost:1234/v1\nLOCAL_LLM_MODEL=your-model\n\n# Or an OpenAI-compatible hosted provider\nLLM_PROVIDER=hosted\nHOSTED_LLM_BASE_URL=https://your-provider.example/v1\nHOSTED_LLM_MODEL=your-model\nHOSTED_LLM_API_KEY=server-side-secret`}</pre>
         <p className="tiny-copy spaced-top">

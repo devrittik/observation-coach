@@ -20,9 +20,9 @@ No camera, object identification, feeds, competitive scores, or streaks. The “
 
 ## Run the app
 
-Requirements: Node.js 20.9+ (tested on Node 20.20.2), npm, and MongoDB running as a replica set. The included Docker Compose setup supplies a persistent local database. The MongoDB driver requires the Node runtime, not Edge.
+Requirements: Node.js 20.9+ (tested on Node 20.20.2), npm, and MongoDB running as a replica set — **either your already-installed MongoDB (no Docker; `scripts/mongodb-enable-replicaset` enables it in one step) or the included Docker Compose service**. The MongoDB driver requires the Node runtime, not Edge.
 
-**Full Windows/local/Atlas instructions: [DATABASE.md](DATABASE.md).** If you already have `.env.local`, merge its database settings instead of overwriting your LLM configuration.
+**Full Windows/local/Atlas instructions, including the no-Docker path: [DATABASE.md](DATABASE.md).** If you already have `.env.local`, merge its database settings instead of overwriting your LLM configuration.
 
 ```powershell
 npm ci
