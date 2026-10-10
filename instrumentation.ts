@@ -2,13 +2,13 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs' || process.env.NEXT_PHASE === 'phase-production-build')
     return;
+  // Only import Edge-safe modules here: instrumentation is bundled for Edge too.
   const { info } = await import('@/lib/log');
-  const { appEnvironment } = await import('@/lib/env');
-  const { httpLogEnabled } = await import('@/lib/server/http-log');
+  const { appEnvironment, envFlag } = await import('@/lib/env');
   info('boot', 'observation coach server started', {
     appEnv: appEnvironment(),
     nodeEnv: process.env.NODE_ENV,
-    accessLog: httpLogEnabled(),
+    accessLog: envFlag('LOG_HTTP') ?? appEnvironment() === 'hosted',
     logLevel: process.env.LOG_LEVEL || 'default',
   });
 }

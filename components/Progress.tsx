@@ -1,4 +1,5 @@
 'use client';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, BookOpen, Leaf, Sprout, Wind, ArrowUpRight } from 'lucide-react';
 import { useCoach } from './Provider';
@@ -94,8 +95,21 @@ export function Progress() {
     </div>
   );
 }
+/** Same date label on server and client; switches to the browser's local day after mount. */
+function dayLabel(iso: string, local: boolean) {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    ...(local ? {} : { timeZone: 'UTC' }),
+  });
+}
 export function History() {
   const { data } = useCoach();
+  // Hydration-safe dates: UTC (identical on server and first client render), then
+  // the browser's local day once mounted.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
   const sessions = data.sessions.filter((s) => s.observation || s.status === 'complete');
   return (
     <div className="page-shell wide-content">
@@ -117,13 +131,7 @@ export function History() {
           {sessions.map((s) => (
             <article className="surface-card note-card" key={s.id}>
               <div className="metadata">
-                <span className="eyebrow">
-                  {new Date(s.startedAt).toLocaleDateString('en-GB', {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                  })}
-                </span>
+                <span className="eyebrow">{dayLabel(s.startedAt, hydrated)}</span>
                 <span className="pill">{skillInfo[s.exercise.skill].label}</span>
               </div>
               <h2>{s.exercise.title}</h2>

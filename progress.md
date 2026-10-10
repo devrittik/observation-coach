@@ -185,3 +185,8 @@ The sandbox browser checks use a disposable test replica set, not Atlas. The per
 - [x] Error text now leads with the no-Docker fix (replSet in mongod.cfg + `rs.initiate`) instead of suggesting only Docker/Atlas.
 - [x] `scripts/mongodb-enable-replicaset.ps1` (Windows, Administrator PowerShell) and `scripts/mongodb-enable-replicaset.sh` (macOS/Linux): back up config, enable `replication.replSetName=rs0`, restart the service, initialize once, verify PRIMARY. Idempotent and explicit about already-initialized/foreign replica sets.
 - [x] DATABASE.md section 2 documents manual Windows steps, hand-run `mongod --replSet`, verification, and troubleshooting; README and Settings/global-error copy point to it.
+
+## Hydration and Edge-instrumentation checkpoint
+
+- [x] Edge-instrumentation warnings (`process.stdout`/`process.stderr` in `lib/log.ts`) removed: the logger now writes through `console.*` (stdout/stderr mapping in Node, valid in Edge and browsers), and `instrumentation.ts` imports only Edge-safe modules (no morgan chain). Production build is warning-free.
+- [x] Hydration mismatch fixed: history date labels are deterministic (UTC) during SSR and first client render, then switch to the browser's local day after mount; the character counter locale is pinned. Guided-demo e2e now fails on any hydration console warning.

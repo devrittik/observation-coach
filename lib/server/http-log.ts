@@ -58,5 +58,6 @@ export function formatAccessLine(input: AccessLogInput): string {
 }
 export function logAccess(input: AccessLogInput): void {
   if (!httpLogEnabled() || !levelEnabled('info')) return;
-  process.stdout.write(formatAccessLine(input) + '\n');
+  // Raw combined line, unprefixed, on stdout — the same output console.log gives.
+  console.log(formatAccessLine(input));
 }

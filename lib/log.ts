@@ -67,15 +67,13 @@ function write(
   if (!levelEnabled(level)) return;
   const extra = fields && Object.keys(fields).length ? ' ' + JSON.stringify(redact(fields)) : '';
   const line = `${new Date().toISOString()} ${level.toUpperCase().padEnd(5)} [${source}] ${message}${extra}`;
-  if (typeof window !== 'undefined') {
-    if (level === 'debug') console.debug(line);
-    else if (level === 'info') console.info(line);
-    else if (level === 'warn') console.warn(line);
-    else console.error(line);
-    return;
-  }
-  if (level === 'warn' || level === 'error') process.stderr.write(line + '\n');
-  else process.stdout.write(line + '\n');
+  // console.* works in Node, the Edge runtime, and browsers. In Node it maps
+  // debug/info to stdout and warn/error to stderr — and it avoids process.stdout
+  // references that make bundlers warn about Edge-instrumentation bundles.
+  if (level === 'debug') console.debug(line);
+  else if (level === 'info') console.info(line);
+  else if (level === 'warn') console.warn(line);
+  else console.error(line);
 }
 export const debug = (source: string, message: string, fields?: LogFields) =>
   write('debug', source, message, fields);

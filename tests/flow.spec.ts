@@ -6,6 +6,10 @@ test('guided demo: observation, refresh-safe draft, follow-up, progress and hist
 }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  // Hydration mismatches surface as console warnings; treat them as failures here.
+  page.on('console', (msg) => {
+    if (/hydrat/i.test(msg.text())) errors.push(msg.text());
+  });
   await page.goto('/');
   await page.getByRole('button', { name: 'Try the guided demo' }).click();
   await expect(page).toHaveURL(/\/session/);

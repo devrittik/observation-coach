@@ -415,7 +415,7 @@ export function SessionFlow() {
             ) : (
               <span>A few honest details are enough.</span>
             )}
-            <span>{text.length.toLocaleString()} / 5,000</span>
+            <span>{text.length.toLocaleString('en-US')} / 5,000</span>
           </div>
           <div className="action-row spaced-top">
             <button
