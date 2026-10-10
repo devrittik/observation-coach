@@ -9,6 +9,7 @@ import type {
 } from '@/lib/types';
 import { emptyProgress, levelFor, updateScores } from '@/lib/observation/progression';
 import { databaseConfig, DatabaseSetupError, DatabaseUnavailableError } from './config';
+import { debug, info, warn, errorInfo } from '@/lib/log';
 export { DatabaseSetupError, DatabaseUnavailableError } from './config';
 
 export type UserDocument = {
@@ -36,7 +37,9 @@ type Connection = { client: MongoClient; database: Db };
 const globalDb = globalThis as unknown as {
   coachMongo?: { key: string; promise: Promise<Connection> };
 };
-export class MissingUserError extends Error {}
+export class MissingUserError extends Error {
+  name = 'MissingUserError';
+}
 export const isDuplicateKey = (e: unknown) => e instanceof MongoServerError && e.code === 11000;
 
 async function initialize(): Promise<Connection> {
@@ -50,6 +53,11 @@ async function initialize(): Promise<Connection> {
   const promise = (async () => {
     let client: MongoClient | undefined;
     try {
+      debug('db', 'connecting to MongoDB', {
+        environment: config.environment,
+        database: config.name,
+        configSource: process.env.MONGODB_URI?.trim() ? 'MONGODB_URI' : 'default',
+      });
       client = new MongoClient(config.uri, {
         maxPoolSize: 10,
         maxIdleTimeMS: 60000,
@@ -59,10 +67,12 @@ async function initialize(): Promise<Connection> {
       await client.connect();
       const database = client.db(config.name);
       const hello = await database.command({ hello: 1 });
-      if (!hello.setName && hello.msg !== 'isdbgrid')
+      if (!hello.setName && hello.msg !== 'isdbgrid') {
+        warn('db', 'MongoDB server is not a replica set');
         throw new DatabaseSetupError(
           'MongoDB must run as a replica set to preserve atomic account and progress updates. Start the supplied Docker Compose service locally, or use MongoDB Atlas.',
         );
+      }
       await Promise.all([
         database
           .collection<UserDocument>('users')
@@ -95,11 +105,21 @@ async function initialize(): Promise<Connection> {
           .collection<RateDocument>('rate_limits')
           .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
       ]);
+      debug('db', 'indexes ready', { environment: config.environment, database: config.name });
+      info('db', 'connected to MongoDB', {
+        environment: config.environment,
+        database: config.name,
+        poolSize: 10,
+      });
       return { client, database };
     } catch (error) {
       await client?.close().catch(() => {});
-      if (error instanceof DatabaseSetupError) throw error;
+      if (error instanceof DatabaseSetupError) {
+        warn('db', 'database setup problem', errorInfo(error));
+        throw error;
+      }
       // Never expose driver messages: they may contain hostnames, credentials, or a URI.
+      warn('db', 'MongoDB connection failed', errorInfo(error));
       throw new DatabaseUnavailableError(
         config.environment === 'local'
           ? 'Local MongoDB is unavailable. Start the persistent MongoDB replica set and check MONGODB_URI. Your existing data has not been reset.'
@@ -119,6 +139,7 @@ export async function db(): Promise<Db> {
   return (await initialize()).database;
 }
 export async function closeDatabase() {
+  debug('db', 'closing MongoDB connection');
   const cached = globalDb.coachMongo;
   delete globalDb.coachMongo;
   if (cached) await cached.promise.then((c) => c.client.close()).catch(() => {});
@@ -131,6 +152,7 @@ export function publicUser(row: UserDocument): User {
 }
 export async function createUser(user: Omit<UserDocument, 'revision'>) {
   await (await db()).collection<UserDocument>('users').insertOne({ ...user, revision: 0 });
+  debug('db', 'user created', { userId: user._id, demo: user.isDemo });
 }
 export async function findUserByEmail(email: string) {
   return (await db())
@@ -144,6 +166,7 @@ export async function findUserByToken(tokenHash: string): Promise<User | null> {
     .findOne({ _id: tokenHash, expiresAt: { $gt: new Date() } });
   if (!auth) return null;
   const user = await d.collection<UserDocument>('users').findOne({ _id: auth.userId, ...alive() });
+  debug('db', 'session lookup', { userId: auth.userId, found: !!user });
   return user ? publicUser(user) : null;
 }
 /** Touch the owner in every write transaction, serializing mutations with account deletion. */
@@ -189,10 +212,16 @@ export async function saveLogin(
     await d
       .collection<AuthDocument>('auth_sessions')
       .insertOne({ _id: tokenHash, userId: uid, expiresAt }, { session });
+    debug('db', 'login token stored', {
+      userId: uid,
+      rotated: !!previousHash,
+      expiresAt: expiresAt.toISOString(),
+    });
   });
 }
 export async function deleteLogin(hash: string) {
   await (await db()).collection<AuthDocument>('auth_sessions').deleteOne({ _id: hash });
+  debug('db', 'login token revoked');
 }
 export async function deleteAccount(uid: string) {
   return withUser(uid, async (d, session) => {
@@ -206,6 +235,9 @@ export async function deleteAccount(uid: string) {
       .collection<RateDocument>('rate_limits')
       .deleteMany({ _id: { $in: [`session:${uid}`, `coach:${uid}`] } }, { session });
     await d.collection<UserDocument>('users').deleteOne({ _id: uid }, { session });
+  }).then((result) => {
+    info('db', 'account deleted', { userId: uid });
+    return result;
   });
 }
 export async function getProgress(uid: string): Promise<Progress> {
@@ -243,7 +275,10 @@ export async function createOrResumeSession(
   return withUser(uid, async (d, session, user) => {
     const collection = d.collection<ObservationDocument>('observations');
     const active = await collection.findOne({ userId: uid, active: true }, { session });
-    if (active) return active.data;
+    if (active) {
+      debug('db', 'active session resumed', { userId: uid, sessionId: active.data.id });
+      return active.data;
+    }
     await collection.insertOne(
       {
         _id: data.id,
@@ -255,6 +290,12 @@ export async function createOrResumeSession(
       },
       { session },
     );
+    debug('db', 'session created', {
+      userId: uid,
+      sessionId: data.id,
+      duration: data.duration,
+      provider: data.provider,
+    });
     return data;
   });
 }
@@ -267,14 +308,26 @@ export async function patchSession(
   return withUser(uid, async (d, session) => {
     const collection = d.collection<ObservationDocument>('observations');
     const row = await collection.findOne({ _id: id, userId: uid }, { session });
-    if (!row) return null;
-    if (row.data.status !== expected) return row.data;
+    if (!row) {
+      debug('db', 'session patch skipped: not found', { userId: uid, sessionId: id });
+      return null;
+    }
+    if (row.data.status !== expected) {
+      debug('db', 'session patch skipped: stage moved on', {
+        userId: uid,
+        sessionId: id,
+        expected,
+        status: row.data.status,
+      });
+      return row.data;
+    }
     const data = { ...row.data, ...patch, id: row.data.id };
     await collection.updateOne(
       { _id: id, userId: uid },
       { $set: { data, active: data.status !== 'complete' } },
       { session },
     );
+    debug('db', 'session updated', { userId: uid, sessionId: id, expected, status: data.status });
     return data;
   });
 }
@@ -295,8 +348,18 @@ export async function completeSession(
   return withUser(uid, async (d, session, user) => {
     const observations = d.collection<ObservationDocument>('observations');
     const row = await observations.findOne({ _id: id, userId: uid }, { session });
-    if (!row) return null;
-    if (row.data.status !== 'feedback' || !row.data.feedback) return row.data;
+    if (!row) {
+      debug('db', 'completion skipped: not found', { userId: uid, sessionId: id });
+      return null;
+    }
+    if (row.data.status !== 'feedback' || !row.data.feedback) {
+      debug('db', 'completion skipped: not awaiting completion', {
+        userId: uid,
+        sessionId: id,
+        status: row.data.status,
+      });
+      return row.data;
+    }
     const progressCollection = d.collection<ProgressDocument>('progress');
     const current =
       (await progressCollection.findOne({ _id: uid }, { session }))?.data ?? emptyProgress();
@@ -325,6 +388,12 @@ export async function completeSession(
       { $set: { data: updated, ...(user.expiresAt ? { expiresAt: user.expiresAt } : {}) } },
       { upsert: true, session },
     );
+    debug('db', 'session completed with progress', {
+      userId: uid,
+      sessionId: id,
+      total: updated.total,
+      level: updated.level,
+    });
     return data;
   });
 }
@@ -346,9 +415,12 @@ export async function rateLimit(key: string, max = 20, windowMs = 600000): Promi
         ],
         { upsert: true, returnDocument: 'after' },
       );
-      return !!row && row.count <= max;
+      const allowed = !!row && row.count <= max;
+      if (!allowed) debug('db', 'rate limit reached', { key });
+      return allowed;
     } catch (error) {
       if (!isDuplicateKey(error) || attempt === 2) throw error;
+      debug('db', 'rate limit upsert retried', { key });
     }
   }
   return false;

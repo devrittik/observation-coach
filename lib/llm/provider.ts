@@ -4,7 +4,10 @@ import { skillNames } from '@/lib/types';
 import { emptyScores, chooseExercise } from '@/lib/observation/progression';
 import { coachSystem, analysisPrompt, exercisePrompt } from './prompts';
 import { feedbackSchema, exerciseSchema } from './schemas';
-export class CoachError extends Error {}
+import { debug, warn, errorInfo } from '@/lib/log';
+export class CoachError extends Error {
+  name = 'CoachError';
+}
 export function providerConfig(): { provider: Provider; configured: boolean } {
   const p = process.env.LLM_PROVIDER || 'demo';
   if (!['demo', 'local', 'hosted'].includes(p))
@@ -25,6 +28,7 @@ export function providerConfig(): { provider: Provider; configured: boolean } {
 }
 async function request<T>(
   provider: Provider,
+  promptKind: 'exercise' | 'feedback' | 'next',
   prompt: string,
   data: unknown,
   schema: z.ZodType<T>,
@@ -37,6 +41,8 @@ async function request<T>(
     throw new CoachError(
       `${provider === 'local' ? 'Local' : 'Hosted'} coaching needs setup. Configure ${prefix}_BASE_URL, ${prefix}_MODEL${provider === 'hosted' ? ', and HOSTED_LLM_API_KEY' : ''} on the server, then restart. You can still explore the separate guided demo.`,
     );
+  const started = Date.now();
+  debug('llm', 'model request', { provider, model, promptKind });
   try {
     const url = new URL(base);
     if (!['http:', 'https:'].includes(url.protocol)) throw new Error('URL');
@@ -66,9 +72,32 @@ async function request<T>(
     const raw = payload?.choices?.[0]?.message?.content;
     if (typeof raw !== 'string' || raw.length > 20000) throw new Error('Invalid model response');
     const parsed = JSON.parse(raw.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, ''));
+    debug('llm', 'model response accepted', {
+      provider,
+      model,
+      promptKind,
+      ms: Date.now() - started,
+    });
     return schema.parse(parsed);
   } catch (e) {
-    if (e instanceof CoachError) throw e;
+    if (e instanceof CoachError) {
+      warn('llm', 'model request failed', {
+        provider,
+        model,
+        promptKind,
+        ms: Date.now() - started,
+        ...errorInfo(e),
+      });
+      throw e;
+    }
+    // Never log the raw error: parser/driver messages can quote prompts or credentials.
+    warn('llm', 'model response unusable', {
+      provider,
+      model,
+      promptKind,
+      ms: Date.now() - started,
+      ...errorInfo(e),
+    });
     throw new CoachError(
       `The ${provider} coach could not return a valid response. Check that the model is reachable and supports the requested JSON format, then retry. No other provider was used.`,
     );
@@ -130,6 +159,7 @@ export const llmService = {
       ? chooseExercise(progress, recent)
       : request(
           provider,
+          'exercise',
           exercisePrompt,
           { progress, recent, duration },
           exerciseSchema.refine(
@@ -143,10 +173,21 @@ export const llmService = {
     observation: string,
     exercise: Exercise,
   ): Promise<Feedback> {
+    debug('llm', 'analysing observation', {
+      provider,
+      length: observation.length,
+      skill: exercise.skill,
+    });
     const result =
       provider === 'demo'
         ? demoAnalysis(observation)
-        : await request(provider, analysisPrompt, { observation, exercise }, feedbackSchema);
+        : await request(
+            provider,
+            'feedback',
+            analysisPrompt,
+            { observation, exercise },
+            feedbackSchema,
+          );
     // Scores require evidence literally present in the user's text.
     for (const skill of skillNames) {
       const quote = result.evidence[skill];
@@ -172,6 +213,7 @@ export const llmService = {
       ? chooseExercise(progress, recent, feedback.nextFocus)
       : request(
           provider,
+          'next',
           exercisePrompt,
           { progress, recent, feedback, observation, followup },
           exerciseSchema.refine(

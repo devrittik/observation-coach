@@ -2,6 +2,7 @@ import { scrypt as scryptCb, randomBytes, createHash, timingSafeEqual } from 'no
 import { promisify } from 'node:util';
 import { cookies } from 'next/headers';
 import { findUserByToken, saveLogin, deleteLogin } from '@/lib/db';
+import { debug } from '@/lib/log';
 import type { User } from '@/lib/types';
 const scrypt = promisify(scryptCb);
 export const cookieName = 'observation_session';
@@ -40,6 +41,7 @@ const digest = (s: string) => createHash('sha256').update(s).digest('hex');
 export async function currentUser(): Promise<User | null> {
   const token = (await cookies()).get(cookieName)?.value;
   if (!token) return null;
+  debug('auth', 'resolving session cookie');
   return findUserByToken(digest(token));
 }
 export async function createLogin(uid: string, isDemo = false) {
@@ -56,10 +58,12 @@ export async function createLogin(uid: string, isDemo = false) {
     ...cookieOptions(),
     maxAge,
   });
+  debug('auth', 'session token issued', { userId: uid, demo: isDemo, maxAgeSeconds: maxAge });
 }
 export async function logout() {
   const jar = await cookies();
   const token = jar.get(cookieName)?.value;
   if (token) await deleteLogin(digest(token));
   jar.set(cookieName, '', { ...cookieOptions(), maxAge: 0 });
+  debug('auth', 'logged out', { revoked: !!token });
 }

@@ -1,9 +1,13 @@
+import { appEnvironment } from '@/lib/env';
 /** APP_ENV is explicit so a local production build can still use local MongoDB. */
-export class DatabaseSetupError extends Error {}
-export class DatabaseUnavailableError extends Error {}
+export class DatabaseSetupError extends Error {
+  name = 'DatabaseSetupError';
+}
+export class DatabaseUnavailableError extends Error {
+  name = 'DatabaseUnavailableError';
+}
 export function databaseConfig() {
-  const environment =
-    process.env.APP_ENV || (process.env.NODE_ENV === 'production' ? 'hosted' : 'local');
+  const environment = appEnvironment();
   if (environment !== 'local' && environment !== 'hosted') {
     throw new DatabaseSetupError('APP_ENV must be local or hosted.');
   }

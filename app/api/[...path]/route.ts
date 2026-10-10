@@ -22,10 +22,13 @@ import {
 } from '@/lib/db';
 import { emptyProgress, levelFor, updateScores } from '@/lib/observation/progression';
 import { llmService, providerConfig, CoachError } from '@/lib/llm/provider';
+import { debug, info, warn, error as logError, errorInfo } from '@/lib/log';
+import { logAccess } from '@/lib/server/http-log';
 import type { ObservationSession } from '@/lib/types';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 class HttpError extends Error {
+  name = 'HttpError';
   constructor(
     message: string,
     public status = 400,
@@ -34,7 +37,13 @@ class HttpError extends Error {
   }
 }
 const json = (data: unknown, status = 200) =>
-  NextResponse.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
+  NextResponse.json(data, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store',
+      'Content-Length': String(Buffer.byteLength(JSON.stringify(data))),
+    },
+  });
 function ensureOrigin(req: NextRequest) {
   const origin = req.headers.get('origin');
   const host = req.headers.get('host');
@@ -51,9 +60,8 @@ async function body(req: NextRequest) {
     throw new HttpError('Please send a valid request.');
   }
 }
-async function handle(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+async function handleRequest(req: NextRequest, path: string) {
   try {
-    const path = (await params).path.join('/');
     if (req.method !== 'GET') ensureOrigin(req);
     if (path === 'bootstrap' && req.method === 'GET') {
       const user = await currentUser();
@@ -80,6 +88,7 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
           expiresAt: new Date(Date.now() + 86400000),
         });
         await createLogin(id, true);
+        info('auth', 'demo account created', { userId: id });
         return json({ ok: true });
       }
       const input = z
@@ -120,6 +129,7 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
           throw error;
         }
         await createLogin(id);
+        info('auth', 'account created', { userId: id });
         return json({ ok: true }, 201);
       }
       // Hash even for unknown accounts to reduce account enumeration via timing.
@@ -127,8 +137,12 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
         input.password,
         row ? String(row.password) : '00000000000000000000000000000000:' + '0'.repeat(128),
       );
-      if (!row || !valid) throw new HttpError('The email or password is not correct.', 401);
+      if (!row || !valid) {
+        debug('auth', 'login rejected');
+        throw new HttpError('The email or password is not correct.', 401);
+      }
       await createLogin(publicUser(row).id);
+      debug('auth', 'login ok', { userId: publicUser(row).id });
       return json({ ok: true });
     }
     const user = await currentUser();
@@ -148,6 +162,7 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
       const input = z
         .object({ duration: z.union([z.literal(5), z.literal(10), z.literal(20), z.literal(30)]) })
         .parse(await body(req));
+      debug('api', 'session start requested', { userId: user.id, duration: input.duration });
       const active = (await getSessions(user.id)).find((s) => s.status !== 'complete');
       if (active) return json({ session: active });
       const provider = user.isDemo ? 'demo' : providerConfig().provider;
@@ -228,6 +243,12 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
         const saved = await patchSession(user.id, id, 'reflection', { observation });
         if (!saved) throw new HttpError('That observation session was not found.', 404);
         if (saved.status !== 'reflection') return json({ session: saved });
+        debug('api', 'reflect submitted', {
+          userId: user.id,
+          sessionId: id,
+          provider: s.provider,
+          length: observation.length,
+        });
         const feedback = await llmService.analyzeObservation(s.provider, observation, s.exercise);
         feedback.question = llmService.generateFollowUp(feedback);
         const result = await saveFeedback(user.id, id, observation, feedback);
@@ -262,23 +283,36 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
           s.observation || '',
           followup,
         );
+        debug('api', 'complete submitted', { userId: user.id, sessionId: id });
         const result = await completeSession(user.id, id, followup, next);
         return json({ session: result });
       }
     }
     throw new HttpError('Not found.', 404);
   } catch (e) {
-    if (e instanceof HttpError) return json({ error: e.message }, e.status);
-    if (e instanceof z.ZodError)
+    if (e instanceof HttpError) {
+      const log = e.status === 429 || e.status >= 500 ? warn : debug;
+      log('api', 'request rejected', { path, status: e.status, message: e.message });
+      return json({ error: e.message }, e.status);
+    }
+    if (e instanceof z.ZodError) {
+      debug('api', 'invalid input', { path, issue: e.issues[0]?.message || 'invalid' });
       return json({ error: e.issues[0]?.message || 'Please check your input.' }, 400);
+    }
     if (
       e instanceof CoachError ||
       e instanceof DatabaseSetupError ||
       e instanceof DatabaseUnavailableError
-    )
+    ) {
+      warn('api', 'dependency unavailable', { path, ...errorInfo(e) });
       return json({ error: e.message }, 503);
-    if (e instanceof MissingUserError) return json({ error: e.message }, 401);
-    console.error('Request failed:', e instanceof Error ? e.name : 'unknown');
+    }
+    if (e instanceof MissingUserError) {
+      warn('api', 'account unavailable', { path, ...errorInfo(e) });
+      return json({ error: e.message }, 401);
+    }
+    // Sanitized on purpose: unknown error messages may quote credentials or input.
+    logError('api', 'request failed', { path, ...errorInfo(e) });
     return json(
       {
         error: 'We could not save that change. Please try again. Your account has not been reset.',
@@ -286,5 +320,42 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ path: st
       500,
     );
   }
+}
+async function handle(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const started = Date.now();
+  const path = (await params).path.join('/');
+  let response: NextResponse;
+  try {
+    response = await handleRequest(req, path);
+  } catch (e) {
+    // handleRequest converts known failures to responses; anything reaching here is a bug.
+    logError('api', 'request crashed', { path, ...errorInfo(e) });
+    response = json(
+      {
+        error: 'We could not save that change. Please try again. Your account has not been reset.',
+      },
+      500,
+    );
+  }
+  const url = new URL(req.url);
+  logAccess({
+    method: req.method,
+    url: url.pathname + url.search,
+    status: response.status,
+    contentLength: response.headers.get('content-length') || undefined,
+    ip:
+      req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      req.headers.get('x-real-ip') ||
+      undefined,
+    userAgent: req.headers.get('user-agent') || undefined,
+    referer: req.headers.get('referer') || undefined,
+  });
+  debug('http', 'api request', {
+    method: req.method,
+    path,
+    status: response.status,
+    ms: Date.now() - started,
+  });
+  return response;
 }
 export { handle as GET, handle as POST, handle as DELETE };

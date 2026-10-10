@@ -1,3 +1,4 @@
+import { debug, warn, errorInfo } from '@/lib/log';
 /** Optional voice adapters. Browser recognition may send audio to the browser vendor. */
 export interface SpeechInput {
   supported(): boolean;
@@ -117,6 +118,7 @@ export function startDictation(
   };
   const stopListening = () => {
     if (stopping || finished) return;
+    debug('voice', 'dictation stopping');
     stopping = true;
     timers.clear(silenceHandle);
     timers.clear(restartHandle);
@@ -131,7 +133,10 @@ export function startDictation(
   };
   const armSilence = () => {
     timers.clear(silenceHandle);
-    silenceHandle = timers.set(stopListening, silenceMs);
+    silenceHandle = timers.set(() => {
+      debug('voice', 'dictation stopped after silence', { silenceMs });
+      stopListening();
+    }, silenceMs);
   };
   const startInstance = () => {
     try {
@@ -154,7 +159,12 @@ export function startDictation(
         if (!stopping) armSilence();
       };
       r.onerror = (event) => {
-        if (finished || !FATAL_ERRORS.has(event.error)) return;
+        if (finished) return;
+        if (!FATAL_ERRORS.has(event.error)) {
+          debug('voice', 'recognition reported a recoverable error', { code: event.error });
+          return;
+        }
+        warn('voice', 'recognition failed', { code: event.error });
         stopping = true;
         if (!failed) {
           failed = true;
@@ -176,6 +186,7 @@ export function startDictation(
         }
         // The browser closed recognition on its own (service pauses, long sessions).
         // Keep listening until the user stops or the silence window expires.
+        debug('voice', 'browser ended recognition; restarting', { restartMs });
         restartHandle = timers.set(() => {
           if (stopping || finished) return;
           startInstance();
@@ -184,15 +195,17 @@ export function startDictation(
       recognition = r;
       r.start();
       live = true;
-    } catch {
+    } catch (e) {
       stopping = true;
       if (!failed) {
         failed = true;
+        warn('voice', 'recognition could not start', errorInfo(e));
         onError(errorMessage('start-failed'));
       }
       finish();
     }
   };
+  debug('voice', 'dictation started', { silenceMs });
   startInstance();
   armSilence();
   return stopListening;

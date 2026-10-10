@@ -169,3 +169,12 @@ The sandbox browser checks use a disposable test replica set, not Atlas. The per
 - [x] A manual edit of the text ends dictation instead of letting late results overwrite typed words.
 - [x] Silence auto-stop, manual stop idempotence, restart, duplicate results, and fatal-error behavior covered in `tests/voice.test.ts`.
 - [ ] Real microphone and speaker behavior on target mobile browsers remains unverified in this environment.
+
+## Logging checkpoint
+
+- [x] `lib/log.ts` leveled logger (debug/info/warn/error/silent via `LOG_LEVEL`) with recursive key-based redaction and curated `errorInfo` sanitization.
+- [x] Debug logs across the codebase: MongoDB connection/transactions/rate limits, auth and token lifecycle, API request outcomes, LLM adapter calls (metadata only — no prompts/reflections), voice dictation state.
+- [x] morgan Apache “combined” access logs for hosted environments (`APP_ENV=hosted`, `LOG_HTTP` override) via `proxy.ts` for pages and the API route handler for `/api` (final status + content length + duration debug line).
+- [x] `instrumentation.ts` boot summary and `onRequestError` capture.
+- [x] `.env.example` / `.env.hosted.example`, README, and architecture document the settings and privacy rules.
+- [x] Unit tests for level filtering, redaction, error sanitization, hosted gating, and combined-format output.

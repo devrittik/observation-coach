@@ -138,6 +138,14 @@ All observation reads/writes include the authenticated userId. Progress uses tha
 
 Local disk encryption/backups and Atlas access/retention settings remain deployment responsibilities. Removing records does not securely erase filesystem sectors, old backups, or a hosted model provider's retained data.
 
+## 5a. Logging
+
+`lib/log.ts` is a small leveled logger (debug/info/warn/error/silent) used everywhere on the server and in the browser console for voice diagnostics. `LOG_LEVEL` controls verbosity; defaults are debug for local development and info on hosted deployments. Every record is one line: ISO timestamp, level, `[source]` tag (`db`, `auth`, `api`, `llm`, `voice`, `http`, `boot`, `request`), message, and a JSON field object.
+
+Safety rules built into the logger: secret-looking field keys (password/token/cookie/uri/email/hash/api-key/…) are redacted recursively, and `errorInfo()` keeps messages only for curated error classes (DatabaseSetupError, DatabaseUnavailableError, MissingUserError, CoachError, HttpError) whose text is hand-written and operator-safe. Unknown errors contribute a name and primitive code only, so driver/parser messages can never quote a credential-bearing URI or a user's reflection.
+
+`lib/server/http-log.ts` renders morgan's Apache **combined** access format through `morgan.compile` and is enabled when `httpLogEnabled()` (hosted default; `LOG_HTTP` override). `proxy.ts` (Next 16 proxy — Node.js runtime) logs page and asset-free document requests; the catch-all API route logs `/api` itself so each line carries the final status, JSON content length, and a companion debug record with duration in milliseconds. `instrumentation.ts` logs server boot configuration and routes unhandled render errors (`onRequestError`) to the error log.
+
 ## 6. Observation lifecycle
 
 ```text

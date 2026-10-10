@@ -149,6 +149,22 @@ Hosted inference is a practical, **explicitly disclosed option** for an accessib
 
 All fonts and images are bundled. Once installed and built, a local application/database/model can work without internet access. You must still be able to reach the application server. There is no service worker or browser-only offline database. Hosted inference and some browser voice services need connectivity.
 
+## Logs and debugging
+
+Server logs are plain single-line text on stdout (warnings/errors on stderr):
+
+```text
+2026-10-10T09:12:33.412Z INFO  [db] connected to MongoDB {"environment":"local","database":"observation_coach","poolSize":10}
+2026-10-10T09:12:34.001Z DEBUG [http] api request {"method":"GET","path":"bootstrap","status":200,"ms":7}
+```
+
+- **`LOG_LEVEL`** — `debug | info | warn | error | silent`. Defaults to `debug` for local development and `info` on hosted servers (`APP_ENV=hosted`). Set `LOG_LEVEL=debug` in hosted secrets for verbose diagnostics. Debug lines cover database connections/transactions, authentication events, session lifecycle, LLM adapter calls, and voice dictation state.
+- **`LOG_HTTP`** — morgan **Apache “combined”** access logs for every page and API request. They default **on for hosted deployments** and off locally; `LOG_HTTP=true|false` overrides either way. Lines are written raw to stdout so log aggregators can parse them like classic web-server access logs. `/api` lines carry the final status and content length; page lines are logged when the proxy routes the request (the routing status is logged, so a rare server-rendered 500 can appear as 200 — `onRequestError` logs those separately as `unhandled server error`).
+
+Privacy: logs never include passwords, tokens, cookies, connection strings, API keys, emails, reflections, or model prompts. Field names that look secret are redacted automatically, and unknown error messages are dropped (only curated error classes keep their hand-written messages; everything else logs a name and code). Access lines include the request path and query string plus client IP/user agent — the same metadata any web-server access log carries.
+
+Logs are written with `next dev`, `next start`, and hosted platforms’ stdout collectors (PM2, Docker, Heroku, VPS journald). Nothing is sent to third-party log services by this app.
+
 ## Optional voice
 
 Browser speech input and explicit read-aloud controls are behind `SpeechInput` and `SpeechOutput` interfaces in `lib/voice/`. Voice is never automatic or mandatory. The UI warns that browser services may use a vendor's servers. Unsupported or denied microphone access leaves typing available.
